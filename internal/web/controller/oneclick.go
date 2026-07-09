@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"errors"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
@@ -18,6 +20,10 @@ func (a *InboundController) oneClickReality(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 
 	user := session.GetLoginUser(c)
+	if user == nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), errors.New("no login user"))
+		return
+	}
 	result, needRestart, err := a.inboundService.BatchCreateRealityVision(user.Id, req)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)

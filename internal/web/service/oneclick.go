@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 )
 
@@ -63,14 +64,19 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 	if req.Count > 100 {
 		req.Count = 100
 	}
-	if req.PortStart <= 0 {
+	if req.PortStart <= 0 || req.PortStart > 65535 {
 		req.PortStart = 20000
 	}
 	if strings.TrimSpace(req.RemarkPrefix) == "" {
 		req.RemarkPrefix = "reality"
 	}
-	if strings.TrimSpace(req.Dest) == "" {
+	req.Dest = strings.TrimSpace(req.Dest)
+	if req.Dest == "" {
 		req.Dest = "www.microsoft.com:443"
+	}
+	// REALITY dest must be host:port; default to :443 when the caller omits the port.
+	if !strings.Contains(req.Dest, ":") {
+		req.Dest = req.Dest + ":443"
 	}
 	if len(req.ServerNames) == 0 {
 		host := req.Dest
@@ -83,11 +89,41 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 	server := &ServerService{}
 	result := &OneClickResult{Requested: req.Count}
 	anyRestart := false
-	port := req.PortStart
+
+	// Pre-load every port already taken (existing inbounds + the internal Xray
+	// API port) so free ports can be handed out deterministically, instead of
+	// probing AddInbound and pattern-matching on its error text.
+	usedPorts := make(map[int]bool)
+	var existingPorts []int
+	if err := database.GetDB().Model(model.Inbound{}).Pluck("port", &existingPorts).Error; err == nil {
+		for _, p := range existingPorts {
+			usedPorts[p] = true
+		}
+	}
+	usedPorts[reservedAPIPort()] = true
+
+	nextPort := req.PortStart
+	allocPort := func() (int, bool) {
+		for nextPort <= 65535 {
+			p := nextPort
+			nextPort++
+			if !usedPorts[p] {
+				usedPorts[p] = true
+				return p, true
+			}
+		}
+		return 0, false
+	}
 
 	for i := 0; i < req.Count; i++ {
 		kpAny, err := server.GetNewX25519Cert()
 		if err != nil {
+			// GetNewX25519Cert shells out to the xray binary; if the very first
+			// call fails (e.g. xray missing) every node would fail identically,
+			// so fail the whole batch fast with a clear, actionable message.
+			if i == 0 {
+				return nil, false, fmt.Errorf("reality keygen failed (is the xray binary present?): %w", err)
+			}
 			result.Failed++
 			result.Errors = append(result.Errors, fmt.Sprintf("node %d: reality keygen failed: %v", i+1, err))
 			continue
@@ -163,31 +199,21 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 			Sniffing:       string(snBytes),
 		}
 
-		var created *model.Inbound
-		var restart bool
-		var addErr error
-		placed := false
-		for attempts := 0; attempts < 500; attempts++ {
-			inbound.Port = port
-			port++
-			created, restart, addErr = s.AddInbound(inbound)
-			if addErr == nil {
-				placed = true
-				break
-			}
-			// A port conflict just means "try the next port"; anything else is fatal for this node.
-			if strings.Contains(strings.ToLower(addErr.Error()), "port") {
-				continue
-			}
+		port, ok := allocPort()
+		if !ok {
+			// No free ports left in range; remaining nodes can't be placed either.
+			remaining := req.Count - i
+			result.Failed += remaining
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"ran out of free ports at/above %d; %d node(s) not created", req.PortStart, remaining))
 			break
 		}
-		if !placed {
+		inbound.Port = port
+
+		created, restart, addErr := s.AddInbound(inbound)
+		if addErr != nil {
 			result.Failed++
-			msg := "unknown error"
-			if addErr != nil {
-				msg = addErr.Error()
-			}
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", email, msg))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s (port %d): %s", email, port, addErr.Error()))
 			continue
 		}
 
