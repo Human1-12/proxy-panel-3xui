@@ -1,6 +1,7 @@
 import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -552,7 +553,18 @@ export default function InboundsPage() {
 
   const [oneClickOpen, setOneClickOpen] = useState(false);
   const [oneClickLoading, setOneClickLoading] = useState(false);
+  const [oneClickResult, setOneClickResult] = useState<{
+    created: number;
+    failed: number;
+    errors: string[];
+    ports: number[];
+  } | null>(null);
   const [oneClickForm] = Form.useForm();
+
+  const openOneClick = useCallback(() => {
+    setOneClickResult(null);
+    setOneClickOpen(true);
+  }, []);
 
   const submitOneClick = useCallback(async () => {
     let values: { count: number; portStart: number; remarkPrefix?: string; dest?: string };
@@ -562,6 +574,7 @@ export default function InboundsPage() {
       return;
     }
     setOneClickLoading(true);
+    setOneClickResult(null);
     try {
       const msg = await HttpUtil.post(
         '/panel/api/inbounds/oneclick/reality',
@@ -574,10 +587,26 @@ export default function InboundsPage() {
         { headers: { 'Content-Type': 'application/json' } },
       );
       if (msg?.success) {
-        const obj = (msg.obj ?? {}) as { created?: number; failed?: number };
-        messageApi.success(`一键生成完成：成功 ${obj.created ?? 0} 个，失败 ${obj.failed ?? 0} 个`);
-        setOneClickOpen(false);
+        const obj = (msg.obj ?? {}) as {
+          created?: number;
+          failed?: number;
+          errors?: string[];
+          inbounds?: { port?: number }[];
+        };
+        const created = obj.created ?? 0;
+        const failed = obj.failed ?? 0;
+        setOneClickResult({
+          created,
+          failed,
+          errors: obj.errors ?? [],
+          ports: (obj.inbounds ?? []).map((i) => i.port ?? 0).filter((p) => p > 0),
+        });
         await refresh();
+        if (failed === 0) {
+          messageApi.success(`一键生成完成：成功 ${created} 个`);
+        } else {
+          messageApi.warning(`部分完成：成功 ${created} 个，失败 ${failed} 个（详情见弹窗）`);
+        }
       } else {
         messageApi.error(msg?.msg || '生成失败');
       }
@@ -648,7 +677,7 @@ export default function InboundsPage() {
                       type="primary"
                       size="large"
                       icon={<ThunderboltOutlined />}
-                      onClick={() => setOneClickOpen(true)}
+                      onClick={openOneClick}
                       style={{
                         background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 45%, #ec4899 100%)',
                         border: 'none',
@@ -788,11 +817,14 @@ export default function InboundsPage() {
         <Modal
           open={oneClickOpen}
           title="一键配置 · 批量生成 REALITY 节点"
-          onCancel={() => setOneClickOpen(false)}
+          onCancel={() => {
+            setOneClickOpen(false);
+            setOneClickResult(null);
+          }}
           onOk={submitOneClick}
           confirmLoading={oneClickLoading}
           okText="立即生成"
-          cancelText={t('cancel')}
+          cancelText={oneClickResult ? '关闭' : t('cancel')}
         >
           <Form
             form={oneClickForm}
@@ -812,6 +844,42 @@ export default function InboundsPage() {
               <Input placeholder="www.microsoft.com:443" />
             </Form.Item>
           </Form>
+          {oneClickResult && (
+            <Alert
+              style={{ marginTop: 4 }}
+              type={oneClickResult.failed === 0 ? 'success' : 'warning'}
+              showIcon
+              message={
+                oneClickResult.failed === 0
+                  ? `成功生成 ${oneClickResult.created} 个节点`
+                  : `成功 ${oneClickResult.created} 个，失败 ${oneClickResult.failed} 个`
+              }
+              description={
+                <div style={{ fontSize: 12 }}>
+                  {oneClickResult.ports.length > 0 && (
+                    <div>已用端口：{oneClickResult.ports.join('、')}</div>
+                  )}
+                  {oneClickResult.errors.length > 0 && (
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                      {oneClickResult.errors.map((er, idx) => (
+                        <li key={idx}>{er}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {oneClickResult.created > 0 && (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingLeft: 0, marginTop: 4 }}
+                      onClick={() => exportAllLinks()}
+                    >
+                      复制全部节点链接（含新生成）→ 粘贴到 V2rayN
+                    </Button>
+                  )}
+                </div>
+              }
+            />
+          )}
         </Modal>
       </Layout>
     </ConfigProvider>
