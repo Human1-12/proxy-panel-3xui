@@ -11,25 +11,34 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/random"
 )
 
 // OneClickRealityRequest carries the parameters for one-click batch generation
-// of VLESS + TCP + REALITY + Vision inbounds. All fields are optional; empty
-// values fall back to sensible defaults (10 nodes starting at port 20000).
+// of inbounds. All fields are optional; empty values fall back to sensible
+// defaults (10 nodes starting at port 20000).
+//
+// Protocol selects the preset:
+//   - "reality" (default): VLESS + TCP + REALITY + Vision (uses Dest/ServerNames)
+//   - "ss2022":            Shadowsocks 2022-blake3-aes-256-gcm (Dest/ServerNames ignored)
+//
+// Both presets are certificate-free — they run on a bare VPS IP with no domain.
 type OneClickRealityRequest struct {
 	Count        int      `json:"count"`
 	PortStart    int      `json:"portStart"`
 	RemarkPrefix string   `json:"remarkPrefix"`
+	Protocol     string   `json:"protocol"`
 	Dest         string   `json:"dest"`
 	ServerNames  []string `json:"serverNames"`
 }
 
 // OneClickCreatedInbound summarizes one successfully created inbound.
 type OneClickCreatedInbound struct {
-	Id     int    `json:"id"`
-	Port   int    `json:"port"`
-	Remark string `json:"remark"`
-	Email  string `json:"email"`
+	Id       int    `json:"id"`
+	Port     int    `json:"port"`
+	Remark   string `json:"remark"`
+	Email    string `json:"email"`
+	Protocol string `json:"protocol"`
 }
 
 // OneClickResult is the outcome of a batch generation run.
@@ -52,11 +61,95 @@ func oneClickRandHex(nBytes int) string {
 	return hex.EncodeToString(b)
 }
 
-// BatchCreateRealityVision generates req.Count VLESS + TCP + REALITY + Vision
-// inbounds in one call. Each node gets its own freshly generated X25519 keypair,
-// random shortId, client UUID and subId. Inbounds are persisted through the
-// normal AddInbound path so they are identical to manually created ones.
-// Returns the per-inbound result and whether xray needs a restart.
+// oneClickSniffing returns the default (disabled) sniffing block shared by the presets.
+func oneClickSniffing() map[string]any {
+	return map[string]any{
+		"enabled":      false,
+		"destOverride": []string{"http", "tls", "quic", "fakedns"},
+		"metadataOnly": false,
+		"routeOnly":    false,
+	}
+}
+
+// realityInboundParts builds the settings / streamSettings / sniffing maps for a
+// VLESS + TCP + REALITY + Vision node, given a freshly generated X25519 keypair.
+func realityInboundParts(req OneClickRealityRequest, email, subId, priv, pub string) (map[string]any, map[string]any, map[string]any) {
+	settings := map[string]any{
+		"clients": []map[string]any{{
+			"id":         uuid.New().String(),
+			"flow":       "xtls-rprx-vision",
+			"email":      email,
+			"enable":     true,
+			"subId":      subId,
+			"reset":      0,
+			"limitIp":    0,
+			"totalGB":    0,
+			"expiryTime": 0,
+		}},
+		"decryption": "none",
+		"fallbacks":  []any{},
+	}
+	stream := map[string]any{
+		"network":  "tcp",
+		"security": "reality",
+		"realitySettings": map[string]any{
+			"show":        false,
+			"dest":        req.Dest,
+			"serverNames": req.ServerNames,
+			"privateKey":  priv,
+			"shortIds":    []string{oneClickRandHex(4)},
+			"settings": map[string]any{
+				"publicKey":   pub,
+				"fingerprint": "chrome",
+				"spiderX":     "/",
+			},
+		},
+		"tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
+	}
+	return settings, stream, oneClickSniffing()
+}
+
+// ss2022InboundParts builds the settings / streamSettings / sniffing maps for a
+// Shadowsocks 2022-blake3-aes-256-gcm node. That method needs a 32-byte PSK, so
+// both the server key and each client key are 32 random bytes, base64-encoded —
+// matching what the panel produces for a hand-created SS-2022 inbound (and what
+// AddInbound's normalizeShadowsocksClientKeys validates).
+func ss2022InboundParts(email, subId string) (map[string]any, map[string]any, map[string]any) {
+	const ssKeyBytes = 32 // 2022-blake3-aes-256-gcm
+	settings := map[string]any{
+		"method":   "2022-blake3-aes-256-gcm",
+		"password": random.Base64Bytes(ssKeyBytes),
+		"network":  "tcp,udp",
+		"clients": []map[string]any{{
+			"method":     "",
+			"password":   random.Base64Bytes(ssKeyBytes),
+			"email":      email,
+			"enable":     true,
+			"subId":      subId,
+			"reset":      0,
+			"limitIp":    0,
+			"totalGB":    0,
+			"expiryTime": 0,
+			"comment":    "",
+		}},
+		"ivCheck": false,
+	}
+	stream := map[string]any{
+		"network":     "tcp",
+		"security":    "none",
+		"tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
+	}
+	return settings, stream, oneClickSniffing()
+}
+
+// BatchCreateRealityVision generates req.Count inbounds in one call, one per
+// node, each with its own freshly generated keys / UUID / subId. Ports are
+// allocated deterministically from a pre-loaded set of used ports. Inbounds are
+// persisted through the normal AddInbound path so they are identical to manually
+// created ones. Returns the per-inbound result and whether xray needs a restart.
+//
+// Despite the historical name, req.Protocol selects the preset (see
+// OneClickRealityRequest); "reality" is the default.
 func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealityRequest) (*OneClickResult, bool, error) {
 	if req.Count <= 0 {
 		req.Count = 10
@@ -67,8 +160,16 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 	if req.PortStart <= 0 || req.PortStart > 65535 {
 		req.PortStart = 20000
 	}
+	req.Protocol = strings.ToLower(strings.TrimSpace(req.Protocol))
+	if req.Protocol != "ss2022" {
+		req.Protocol = "reality"
+	}
 	if strings.TrimSpace(req.RemarkPrefix) == "" {
-		req.RemarkPrefix = "reality"
+		if req.Protocol == "ss2022" {
+			req.RemarkPrefix = "ss"
+		} else {
+			req.RemarkPrefix = "reality"
+		}
 	}
 	req.Dest = strings.TrimSpace(req.Dest)
 	if req.Dest == "" {
@@ -116,69 +217,39 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 	}
 
 	for i := 0; i < req.Count; i++ {
-		kpAny, err := server.GetNewX25519Cert()
-		if err != nil {
-			// GetNewX25519Cert shells out to the xray binary; if the very first
-			// call fails (e.g. xray missing) every node would fail identically,
-			// so fail the whole batch fast with a clear, actionable message.
-			if i == 0 {
-				return nil, false, fmt.Errorf("reality keygen failed (is the xray binary present?): %w", err)
-			}
-			result.Failed++
-			result.Errors = append(result.Errors, fmt.Sprintf("node %d: reality keygen failed: %v", i+1, err))
-			continue
-		}
-		kp, _ := kpAny.(map[string]any)
-		priv, _ := kp["privateKey"].(string)
-		pub, _ := kp["publicKey"].(string)
-		if priv == "" || pub == "" {
-			result.Failed++
-			result.Errors = append(result.Errors, fmt.Sprintf("node %d: empty reality key", i+1))
-			continue
-		}
-
-		clientUUID := uuid.New().String()
 		email := fmt.Sprintf("%s-%d-%s", req.RemarkPrefix, i+1, oneClickRandHex(3))
 		subId := oneClickRandHex(8)
-		shortId := oneClickRandHex(4)
 
-		settings := map[string]any{
-			"clients": []map[string]any{{
-				"id":         clientUUID,
-				"flow":       "xtls-rprx-vision",
-				"email":      email,
-				"enable":     true,
-				"subId":      subId,
-				"reset":      0,
-				"limitIp":    0,
-				"totalGB":    0,
-				"expiryTime": 0,
-			}},
-			"decryption": "none",
-			"fallbacks":  []any{},
-		}
-		stream := map[string]any{
-			"network":  "tcp",
-			"security": "reality",
-			"realitySettings": map[string]any{
-				"show":        false,
-				"dest":        req.Dest,
-				"serverNames": req.ServerNames,
-				"privateKey":  priv,
-				"shortIds":    []string{shortId},
-				"settings": map[string]any{
-					"publicKey":   pub,
-					"fingerprint": "chrome",
-					"spiderX":     "/",
-				},
-			},
-			"tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
-		}
-		sniffing := map[string]any{
-			"enabled":      false,
-			"destOverride": []string{"http", "tls", "quic", "fakedns"},
-			"metadataOnly": false,
-			"routeOnly":    false,
+		var proto model.Protocol
+		var settings, stream, sniffing map[string]any
+
+		switch req.Protocol {
+		case "ss2022":
+			proto = model.Shadowsocks
+			settings, stream, sniffing = ss2022InboundParts(email, subId)
+		default: // reality
+			proto = model.VLESS
+			kpAny, err := server.GetNewX25519Cert()
+			if err != nil {
+				// GetNewX25519Cert shells out to the xray binary; if the very first
+				// call fails (e.g. xray missing) every node would fail identically,
+				// so fail the whole batch fast with a clear, actionable message.
+				if i == 0 {
+					return nil, false, fmt.Errorf("reality keygen failed (is the xray binary present?): %w", err)
+				}
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("node %d: reality keygen failed: %v", i+1, err))
+				continue
+			}
+			kp, _ := kpAny.(map[string]any)
+			priv, _ := kp["privateKey"].(string)
+			pub, _ := kp["publicKey"].(string)
+			if priv == "" || pub == "" {
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("node %d: empty reality key", i+1))
+				continue
+			}
+			settings, stream, sniffing = realityInboundParts(req, email, subId, priv, pub)
 		}
 
 		sBytes, _ := json.Marshal(settings)
@@ -188,7 +259,7 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 		inbound := &model.Inbound{
 			UserId:         userId,
 			Enable:         true,
-			Protocol:       model.VLESS,
+			Protocol:       proto,
 			Remark:         fmt.Sprintf("%s-%02d", req.RemarkPrefix, i+1),
 			Listen:         "",
 			Total:          0,
@@ -220,10 +291,11 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 		anyRestart = anyRestart || restart
 		result.Created++
 		result.Inbounds = append(result.Inbounds, OneClickCreatedInbound{
-			Id:     created.Id,
-			Port:   created.Port,
-			Remark: created.Remark,
-			Email:  email,
+			Id:       created.Id,
+			Port:     created.Port,
+			Remark:   created.Remark,
+			Email:    email,
+			Protocol: string(proto),
 		})
 	}
 

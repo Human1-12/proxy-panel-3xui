@@ -13,6 +13,7 @@ import {
   Modal,
   Result,
   Row,
+  Select,
   Spin,
   Statistic,
   message,
@@ -560,6 +561,7 @@ export default function InboundsPage() {
     ports: number[];
   } | null>(null);
   const [oneClickForm] = Form.useForm();
+  const oneClickProto = Form.useWatch('protocol', oneClickForm);
 
   const openOneClick = useCallback(() => {
     setOneClickResult(null);
@@ -567,7 +569,7 @@ export default function InboundsPage() {
   }, []);
 
   const submitOneClick = useCallback(async () => {
-    let values: { count: number; portStart: number; remarkPrefix?: string; dest?: string };
+    let values: { count: number; portStart: number; remarkPrefix?: string; dest?: string; protocol?: string };
     try {
       values = await oneClickForm.validateFields();
     } catch {
@@ -582,6 +584,7 @@ export default function InboundsPage() {
           count: values.count,
           portStart: values.portStart,
           remarkPrefix: values.remarkPrefix,
+          protocol: values.protocol,
           dest: values.dest,
         },
         { headers: { 'Content-Type': 'application/json' } },
@@ -816,7 +819,7 @@ export default function InboundsPage() {
 
         <Modal
           open={oneClickOpen}
-          title="一键配置 · 批量生成 REALITY 节点"
+          title="一键配置 · 批量生成节点"
           onCancel={() => {
             setOneClickOpen(false);
             setOneClickResult(null);
@@ -829,8 +832,16 @@ export default function InboundsPage() {
           <Form
             form={oneClickForm}
             layout="vertical"
-            initialValues={{ count: 10, portStart: 20000, remarkPrefix: 'reality', dest: 'www.microsoft.com:443' }}
+            initialValues={{ protocol: 'reality', count: 10, portStart: 20000, dest: 'www.microsoft.com:443' }}
           >
+            <Form.Item name="protocol" label="协议类型">
+              <Select
+                options={[
+                  { value: 'reality', label: 'VLESS + REALITY + Vision（免域名/证书，推荐）' },
+                  { value: 'ss2022', label: 'Shadowsocks 2022（免域名/证书，简单）' },
+                ]}
+              />
+            </Form.Item>
             <Form.Item name="count" label="生成数量" rules={[{ required: true }]}>
               <InputNumber min={1} max={100} style={{ width: '100%' }} />
             </Form.Item>
@@ -838,11 +849,13 @@ export default function InboundsPage() {
               <InputNumber min={1024} max={65000} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="remarkPrefix" label="备注前缀">
-              <Input />
+              <Input placeholder="留空按协议自动命名（reality / ss）" />
             </Form.Item>
-            <Form.Item name="dest" label="REALITY 目标站 dest（如 www.microsoft.com:443）">
-              <Input placeholder="www.microsoft.com:443" />
-            </Form.Item>
+            {(oneClickProto ?? 'reality') === 'reality' && (
+              <Form.Item name="dest" label="REALITY 目标站 dest（如 www.microsoft.com:443）">
+                <Input placeholder="www.microsoft.com:443" />
+              </Form.Item>
+            )}
           </Form>
           {oneClickResult && (
             <Alert

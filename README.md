@@ -32,7 +32,7 @@
 **传输 & 安全**:TCP · mKCP · WebSocket · gRPC · HTTPUpgrade · XHTTP + TLS / XTLS / **REALITY**
 
 **面板能力**:
-- ⚡ **一键配置**(本项目新增)—— 一键批量生成 N 个 `VLESS + TCP + REALITY + Vision` 节点,每个独立密钥
+- ⚡ **一键配置**(本项目新增)—— 一键批量生成 N 个节点,可选 **VLESS + REALITY + Vision** 或 **Shadowsocks-2022**(两者都免域名/证书),每个独立密钥
 - 每客户端流量配额 / 到期 / IP 限制 · 在线状态 · 二维码 · 分享链接 · 订阅
 - 多节点集群 · 独立订阅服务器 · Telegram bot · REST API + Swagger
 - 13 种界面语言 · 明暗主题 · Fail2ban · SQLite / PostgreSQL
@@ -98,10 +98,10 @@ POST /panel/api/inbounds/oneclick/reality
 Authorization: Bearer <API Token>
 Content-Type: application/json
 
-{ "count": 10, "portStart": 20000, "remarkPrefix": "reality", "dest": "www.microsoft.com:443" }
+{ "count": 10, "portStart": 20000, "protocol": "reality", "remarkPrefix": "", "dest": "www.microsoft.com:443" }
 ```
 
-一次生成 `count` 个 `VLESS + TCP + REALITY + Vision` 入站,各自独立的 X25519 密钥 / UUID / subId / shortId,自动跳过端口冲突。面板 UI 上的「⚡ 一键配置」按钮即调用此接口。
+`protocol` 可选 `reality`(默认,VLESS + TCP + REALITY + Vision)或 `ss2022`(Shadowsocks 2022-blake3-aes-256-gcm);选 `ss2022` 时忽略 `dest`。一次生成 `count` 个入站,各自独立的密钥 / UUID / subId,从已用端口之上**确定性分配**并自动跳过占用端口。`remarkPrefix` 留空则按协议命名(reality / ss)。面板 UI 上的「⚡ 一键配置」按钮即调用此接口。
 
 ---
 
@@ -127,9 +127,9 @@ git merge upstream/main       # 合并 3x-ui 的新版本
 
 ## 🗺️ 路线图
 
-- [x] ⚡ 一键配置(批量 REALITY 节点)—— 后端 + UI
+- [x] ⚡ 一键配置(批量生成节点)—— 后端 + UI,支持 **REALITY / Shadowsocks-2022** 协议选择
 - [ ] 🔀 一键中转(入口机 ↔ 落地机,Xray 出站链式)
-- [ ] 一键配置扩展支持更多协议(做成选协议向导)
+- [ ] 一键配置扩展更多协议 / 传输(VMess、gRPC、XHTTP…)
 - [ ] VPS 一键安装脚本
 - [ ] 界面文字多语言化
 
