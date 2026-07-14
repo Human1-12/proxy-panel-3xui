@@ -834,16 +834,53 @@ export default function InboundsPage() {
             layout="vertical"
             initialValues={{ protocol: 'reality', count: 10, portStart: 20000, dest: 'www.microsoft.com:443' }}
           >
-            <Form.Item name="protocol" label="协议类型">
+            <Form.Item name="protocol" label="协议类型（抗封锁强弱见下方说明）">
               <Select
                 options={[
-                  { value: 'reality', label: 'VLESS + REALITY + Vision（免域名/证书，推荐）' },
-                  { value: 'ss2022', label: 'Shadowsocks 2022（免域名/证书，简单）' },
-                  { value: 'vmess', label: 'VMess + TCP（免域名/证书，简单/调试）' },
-                  { value: 'vlessTcp', label: 'VLESS + TCP（免证书，最简/调试）' },
+                  { value: 'reality', label: 'REALITY —— 抗封最强 · 翻墙首选（推荐）' },
+                  { value: 'ss2022', label: 'Shadowsocks 2022 —— 轻量稳定' },
+                  { value: 'vmess', label: 'VMess + TCP —— 兼容 / 调试' },
+                  { value: 'vlessTcp', label: 'VLESS + TCP —— 最简 / 内网调试' },
                 ]}
               />
             </Form.Item>
+            {(() => {
+              const guide: Record<
+                string,
+                { type: 'success' | 'info' | 'warning'; title: string; desc: string }
+              > = {
+                reality: {
+                  type: 'success',
+                  title: 'REALITY —— 当前最抗封锁，翻墙首选',
+                  desc: '伪装成访问正常大网站（如 microsoft.com），GFW 极难识别，也扛得住主动探测。免域名、免证书，裸 IP 就能用。不确定选哪个，就用它。',
+                },
+                ss2022: {
+                  type: 'info',
+                  title: 'Shadowsocks 2022 —— 轻量稳定，兼容性好',
+                  desc: '新版加密的 SS，配置简单、速度快、老客户端也能连。抗封锁中等（弱于 REALITY），适合线路稳定、要求不高的场景。免域名、免证书。',
+                },
+                vmess: {
+                  type: 'warning',
+                  title: 'VMess + TCP —— 明文传输，仅兼容 / 调试用',
+                  desc: '没有伪装，容易被 DPI 识别，抗封锁较弱。主要用于兼容很老的客户端或本地调试，不建议当主力翻墙节点。免域名、免证书。',
+                },
+                vlessTcp: {
+                  type: 'warning',
+                  title: 'VLESS + TCP —— 基本明文，只做内网 / 调试',
+                  desc: '无加密伪装，极易被封。仅适合内网、本地测试或排查问题做基线，不要用于翻墙。免域名、免证书。',
+                },
+              };
+              const info = guide[oneClickProto ?? 'reality'] ?? guide.reality;
+              return (
+                <Alert
+                  style={{ marginTop: -8, marginBottom: 16 }}
+                  type={info.type}
+                  showIcon
+                  message={info.title}
+                  description={<div style={{ fontSize: 12, lineHeight: 1.7 }}>{info.desc}</div>}
+                />
+              );
+            })()}
             <Form.Item name="count" label="生成数量" rules={[{ required: true }]}>
               <InputNumber min={1} max={100} style={{ width: '100%' }} />
             </Form.Item>
