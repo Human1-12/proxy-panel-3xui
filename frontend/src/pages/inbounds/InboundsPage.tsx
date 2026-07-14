@@ -839,6 +839,8 @@ export default function InboundsPage() {
                 options={[
                   { value: 'reality', label: 'VLESS + REALITY + Vision（免域名/证书，推荐）' },
                   { value: 'ss2022', label: 'Shadowsocks 2022（免域名/证书，简单）' },
+                  { value: 'vmess', label: 'VMess + TCP（免域名/证书，简单/调试）' },
+                  { value: 'vlessTcp', label: 'VLESS + TCP（免证书，最简/调试）' },
                 ]}
               />
             </Form.Item>
@@ -849,7 +851,7 @@ export default function InboundsPage() {
               <InputNumber min={1024} max={65000} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="remarkPrefix" label="备注前缀">
-              <Input placeholder="留空按协议自动命名（reality / ss）" />
+              <Input placeholder="留空按协议自动命名（reality / ss / vmess / vless）" />
             </Form.Item>
             {(oneClickProto ?? 'reality') === 'reality' && (
               <Form.Item name="dest" label="REALITY 目标站 dest（如 www.microsoft.com:443）">

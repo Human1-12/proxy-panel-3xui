@@ -21,8 +21,10 @@ import (
 // Protocol selects the preset:
 //   - "reality" (default): VLESS + TCP + REALITY + Vision (uses Dest/ServerNames)
 //   - "ss2022":            Shadowsocks 2022-blake3-aes-256-gcm (Dest/ServerNames ignored)
+//   - "vmess":             VMess + TCP, no TLS (Dest/ServerNames ignored)
+//   - "vlessTcp":          VLESS + TCP, security "none", no REALITY (Dest/ServerNames ignored)
 //
-// Both presets are certificate-free — they run on a bare VPS IP with no domain.
+// All presets are certificate-free — they run on a bare VPS IP with no domain.
 type OneClickRealityRequest struct {
 	Count        int      `json:"count"`
 	PortStart    int      `json:"portStart"`
@@ -142,6 +144,64 @@ func ss2022InboundParts(email, subId string) (map[string]any, map[string]any, ma
 	return settings, stream, oneClickSniffing()
 }
 
+// vmessTcpInboundParts builds the settings / streamSettings / sniffing maps for a
+// VMess + TCP node with no TLS (certificate-free). Only a client UUID is needed —
+// no keygen. Deliberately omits alterId (the panel uses VMessAEAD; alterId would
+// be legacy). The client's security:"auto" is stripped before xray sees it, by
+// design — same as a hand-created VMess inbound.
+func vmessTcpInboundParts(email, subId string) (map[string]any, map[string]any, map[string]any) {
+	settings := map[string]any{
+		"clients": []map[string]any{{
+			"id":         uuid.New().String(),
+			"security":   "auto",
+			"email":      email,
+			"enable":     true,
+			"subId":      subId,
+			"reset":      0,
+			"limitIp":    0,
+			"totalGB":    0,
+			"expiryTime": 0,
+			"tgId":       0,
+			"comment":    "",
+		}},
+	}
+	stream := map[string]any{
+		"network":     "tcp",
+		"security":    "none",
+		"tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
+	}
+	return settings, stream, oneClickSniffing()
+}
+
+// vlessTcpInboundParts builds the settings / streamSettings / sniffing maps for
+// the simplest VLESS + TCP node: security "none", no REALITY, no TLS. flow MUST
+// stay empty — xtls-rprx-vision needs a TLS/REALITY transport and xray refuses to
+// start with a vision flow under security:"none". encryption is omitted (it gets
+// stripped before xray sees it anyway), matching the reality builder.
+func vlessTcpInboundParts(email, subId string) (map[string]any, map[string]any, map[string]any) {
+	settings := map[string]any{
+		"clients": []map[string]any{{
+			"id":         uuid.New().String(),
+			"flow":       "",
+			"email":      email,
+			"enable":     true,
+			"subId":      subId,
+			"reset":      0,
+			"limitIp":    0,
+			"totalGB":    0,
+			"expiryTime": 0,
+		}},
+		"decryption": "none",
+		"fallbacks":  []any{},
+	}
+	stream := map[string]any{
+		"network":     "tcp",
+		"security":    "none",
+		"tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
+	}
+	return settings, stream, oneClickSniffing()
+}
+
 // BatchCreateRealityVision generates req.Count inbounds in one call, one per
 // node, each with its own freshly generated keys / UUID / subId. Ports are
 // allocated deterministically from a pre-loaded set of used ports. Inbounds are
@@ -161,15 +221,22 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 		req.PortStart = 20000
 	}
 	req.Protocol = strings.ToLower(strings.TrimSpace(req.Protocol))
-	if req.Protocol != "ss2022" {
+	// Known one-click presets → default remark prefix. Adding a preset means one
+	// entry here + one case in the switch below (+ its builder). Unknown or empty
+	// protocols fall back to reality via this whitelist, never silently accepted.
+	// NOTE: keys are lowercase because req.Protocol is lowercased above, so the
+	// frontend value "vlessTcp" arrives here as "vlesstcp".
+	oneClickDefaultPrefix := map[string]string{
+		"reality":  "reality",
+		"ss2022":   "ss",
+		"vmess":    "vmess",
+		"vlesstcp": "vless",
+	}
+	if _, ok := oneClickDefaultPrefix[req.Protocol]; !ok {
 		req.Protocol = "reality"
 	}
 	if strings.TrimSpace(req.RemarkPrefix) == "" {
-		if req.Protocol == "ss2022" {
-			req.RemarkPrefix = "ss"
-		} else {
-			req.RemarkPrefix = "reality"
-		}
+		req.RemarkPrefix = oneClickDefaultPrefix[req.Protocol]
 	}
 	req.Dest = strings.TrimSpace(req.Dest)
 	if req.Dest == "" {
@@ -227,6 +294,12 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 		case "ss2022":
 			proto = model.Shadowsocks
 			settings, stream, sniffing = ss2022InboundParts(email, subId)
+		case "vmess":
+			proto = model.VMESS
+			settings, stream, sniffing = vmessTcpInboundParts(email, subId)
+		case "vlesstcp":
+			proto = model.VLESS
+			settings, stream, sniffing = vlessTcpInboundParts(email, subId)
 		default: // reality
 			proto = model.VLESS
 			kpAny, err := server.GetNewX25519Cert()
