@@ -852,8 +852,11 @@ config_after_update() {
         echo -e "${green}New WebBasePath: ${config_webBasePath}${plain}"
     fi
 
-    # Check and prompt for SSL if missing
-    if [[ -z "$existing_cert" ]]; then
+    # Offer first-time SSL setup only on an INTERACTIVE update. An automated
+    # `x-ui update` (piped / cron / non-tty) must NOT re-run SSL setup: on an
+    # HTTP-only install (deliberately behind a reverse proxy / SSH tunnel) it just
+    # re-attempts ACME and fails on every update with a misleading error.
+    if [[ -z "$existing_cert" && -t 0 ]]; then
         echo ""
         echo -e "${red}═══════════════════════════════════════════${plain}"
         echo -e "${red}      ⚠ NO SSL CERTIFICATE DETECTED ⚠     ${plain}"
@@ -872,7 +875,7 @@ config_after_update() {
         echo -e "${green}Access URL: https://${SSL_HOST}:${existing_port}/${existing_webBasePath}${plain}"
         echo -e "${green}═══════════════════════════════════════════${plain}"
         echo -e "${yellow}⚠ SSL Certificate: Enabled and configured${plain}"
-    else
+    elif [[ -n "$existing_cert" ]]; then
         echo -e "${green}SSL certificate is already configured${plain}"
         # Show access URL with existing certificate
         local cert_domain=$(basename "$(dirname "$existing_cert")")
@@ -882,6 +885,11 @@ config_after_update() {
         echo -e "${green}═══════════════════════════════════════════${plain}"
         echo -e "${green}Access URL: https://${cert_domain}:${existing_port}/${existing_webBasePath}${plain}"
         echo -e "${green}═══════════════════════════════════════════${plain}"
+    else
+        # No cert + non-interactive update: preserve the existing HTTP posture
+        # instead of re-attempting (and failing) ACME on every automated update.
+        echo -e "${yellow}No SSL certificate configured; leaving the panel as-is (HTTP).${plain}"
+        echo -e "${yellow}Run 'x-ui' interactively to set up SSL if you want it.${plain}"
     fi
 
     if [[ "$panel_needs_restart" -eq 1 ]]; then
