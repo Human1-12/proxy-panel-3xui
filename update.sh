@@ -971,7 +971,7 @@ update_x-ui() {
         tag_version="${XUI_UPDATE_TAG}"
         echo -e "${green}Using update tag: ${tag_version}${plain}"
     else
-        tag_version=$(${curl_bin} -Ls "https://api.github.com/repos/Human1-12/proxy-panel-3xui/releases/latest" 2> /dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        tag_version=$(${curl_bin} -Ls "https://api.github.com/repos/Human1-12/proxy-panel-3xui/releases/latest" 2> /dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": ?"([^"]+)".*/\1/')
         if [[ ! -n "$tag_version" ]]; then
             _fail "ERROR: Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later"
         fi

@@ -1400,7 +1400,7 @@ install_x-ui() {
 
     # Download resources
     if [ $# == 0 ]; then
-        tag_version=$(curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/Human1-12/proxy-panel-3xui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        tag_version=$(curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/Human1-12/proxy-panel-3xui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"tag_name": ?"([^"]+)".*/\1/')
         if [[ ! -n "$tag_version" ]]; then
             echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
             exit 1
