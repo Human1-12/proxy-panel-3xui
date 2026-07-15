@@ -57,8 +57,14 @@ type OneClickResult struct {
 func oneClickRandHex(nBytes int) string {
 	b := make([]byte, nBytes)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand should never fail; degrade to a uuid-derived value.
-		return strings.ReplaceAll(uuid.New().String(), "-", "")[:nBytes*2]
+		// crypto/rand should never fail; degrade to uuid-derived values. A
+		// de-hyphenated uuid is only 32 chars, so concatenate until we have
+		// enough — slicing a single one panics for nBytes > 16.
+		var sb strings.Builder
+		for sb.Len() < nBytes*2 {
+			sb.WriteString(strings.ReplaceAll(uuid.New().String(), "-", ""))
+		}
+		return sb.String()[:nBytes*2]
 	}
 	return hex.EncodeToString(b)
 }
@@ -261,12 +267,18 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 	// Pre-load every port already taken (existing inbounds + the internal Xray
 	// API port) so free ports can be handed out deterministically, instead of
 	// probing AddInbound and pattern-matching on its error text.
+	//
+	// This read must not fail silently: an empty usedPorts set would hand out
+	// ports that are already in use, so every AddInbound would fail and the
+	// caller would see a pile of port conflicts instead of the actual database
+	// error. Fail the batch up front with the real cause.
 	usedPorts := make(map[int]bool)
 	var existingPorts []int
-	if err := database.GetDB().Model(model.Inbound{}).Pluck("port", &existingPorts).Error; err == nil {
-		for _, p := range existingPorts {
-			usedPorts[p] = true
-		}
+	if err := database.GetDB().Model(model.Inbound{}).Pluck("port", &existingPorts).Error; err != nil {
+		return nil, false, fmt.Errorf("cannot read ports of existing inbounds: %w", err)
+	}
+	for _, p := range existingPorts {
+		usedPorts[p] = true
 	}
 	usedPorts[reservedAPIPort()] = true
 

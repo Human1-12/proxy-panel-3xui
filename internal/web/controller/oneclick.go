@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"io"
 
 	"github.com/gin-gonic/gin"
 
@@ -16,8 +17,15 @@ import (
 // The JSON body is optional; an empty body creates 10 nodes with default settings.
 func (a *InboundController) oneClickReality(c *gin.Context) {
 	var req service.OneClickRealityRequest
-	// Body is optional — ignore bind errors (e.g. empty body) and use defaults.
-	_ = c.ShouldBindJSON(&req)
+	// An empty body means "use the defaults" (io.EOF from the JSON decoder).
+	// A body that is present but malformed is a mistake, not a request for
+	// defaults: swallowing that error made a truncated
+	// {"protocol":"ss2022","count":2, silently create 10 REALITY nodes and
+	// still report success. Fail loudly instead.
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
 
 	user := session.GetLoginUser(c)
 	if user == nil {
