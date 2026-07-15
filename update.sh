@@ -951,6 +951,59 @@ _install_xui_service_unit() {
     return 0
 }
 
+# Print the lowercase hex SHA-256 of a file (sha256sum, else openssl).
+sha256_of() {
+    local f="$1"
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$f" 2> /dev/null | awk '{print $1}'
+    elif command -v openssl > /dev/null 2>&1; then
+        openssl dgst -sha256 "$f" 2> /dev/null | awk '{print $NF}'
+    fi
+}
+
+# Fetch the SHA-256 digest the GitHub Releases API publishes for a release asset
+# (assets[].digest). Prints bare hex, or nothing if unavailable. Robust to pretty
+# and compact JSON.
+github_asset_sha256() {
+    local tag="$1" asset="$2"
+    ${curl_bin} -Ls --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+        "https://api.github.com/repos/Human1-12/proxy-panel-3xui/releases/tags/${tag}" 2> /dev/null \
+        | tr -d ' ' \
+        | tr ',{}' '\n\n\n' \
+        | awk -v a="\"name\":\"${asset}\"" '
+            $0 == a { found = 1 }
+            found && /^"digest":"sha256:/ {
+                sub(/^"digest":"sha256:/, "")
+                sub(/".*/, "")
+                print
+                exit
+            }'
+}
+
+# Verify a downloaded tarball against its published digest. Returns 1 only on a
+# definite mismatch (fail closed); missing digest/tool is a warning (fail open).
+verify_download_checksum() {
+    local file="$1" tag="$2"
+    local asset="x-ui-linux-$(arch).tar.gz"
+    local expected actual
+    expected=$(github_asset_sha256 "$tag" "$asset")
+    if [[ -z "$expected" ]]; then
+        echo -e "${yellow}Warning: no published SHA-256 for ${asset} (tag ${tag}); skipping integrity check.${plain}" >&2
+        return 0
+    fi
+    actual=$(sha256_of "$file")
+    if [[ -z "$actual" ]]; then
+        echo -e "${yellow}Warning: neither sha256sum nor openssl available; skipping integrity check.${plain}" >&2
+        return 0
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        echo -e "${red}Integrity check FAILED for ${asset} (expected ${expected}, got ${actual}). Refusing to install.${plain}"
+        return 1
+    fi
+    echo -e "${green}Integrity check passed (sha256 verified).${plain}"
+    return 0
+}
+
 update_x-ui() {
     cd ${xui_folder%/x-ui}/
 
@@ -977,13 +1030,19 @@ update_x-ui() {
         fi
     fi
     echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-    ${curl_bin} -fLRo ${xui_folder}-linux-$(arch).tar.gz https://github.com/Human1-12/proxy-panel-3xui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz 2> /dev/null
+    ${curl_bin} -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1024 --speed-time 120 -o ${xui_folder}-linux-$(arch).tar.gz https://github.com/Human1-12/proxy-panel-3xui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz 2> /dev/null
     if [[ $? -ne 0 ]]; then
         _fail "ERROR: Failed to download x-ui, please be sure that your server can access GitHub"
     fi
     if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
         rm ${xui_folder}-linux-$(arch).tar.gz -f > /dev/null 2>&1
         _fail "ERROR: Downloaded x-ui release archive is empty, please be sure that your server can access GitHub"
+    fi
+
+    # Integrity check against the GitHub-published SHA-256 (fail closed on mismatch).
+    if ! verify_download_checksum "${xui_folder}-linux-$(arch).tar.gz" "${tag_version}"; then
+        rm -f ${xui_folder}-linux-$(arch).tar.gz > /dev/null 2>&1
+        _fail "ERROR: SHA-256 integrity check failed for the downloaded archive; aborting update."
     fi
 
     if [[ -e ${xui_folder}/ ]]; then
@@ -1066,22 +1125,28 @@ update_x-ui() {
         chmod +x bin/mtg-linux-$(arch) > /dev/null 2>&1
     fi
 
-    echo -e "${green}Downloading and installing x-ui.sh script...${plain}"
-    local xui_script_temp="/usr/bin/x-ui-temp.$$"
-    rm -f "${xui_script_temp}"
-    ${curl_bin} -fLRo "${xui_script_temp}" https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.sh > /dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
+    echo -e "${green}Installing x-ui.sh management script...${plain}"
+    # Use the x-ui.sh shipped inside the integrity-verified tarball; fall back to
+    # a tag-pinned download only if it is somehow absent. Avoids a second
+    # unverified fetch of the moving main branch on every auto-update.
+    if [[ -s x-ui.sh ]]; then
+        cp -f x-ui.sh /usr/bin/x-ui > /dev/null 2>&1
+        if [[ $? -ne 0 ]]; then
+            _fail "ERROR: Failed to install x-ui.sh script"
+        fi
+    else
+        local xui_script_temp="/usr/bin/x-ui-temp.$$"
         rm -f "${xui_script_temp}"
-        _fail "ERROR: Failed to download x-ui.sh script, please be sure that your server can access GitHub"
-    fi
-    if [[ ! -s "${xui_script_temp}" ]]; then
-        rm -f "${xui_script_temp}"
-        _fail "ERROR: Downloaded x-ui.sh script is empty, please be sure that your server can access GitHub"
-    fi
-    mv -f "${xui_script_temp}" /usr/bin/x-ui
-    if [[ $? -ne 0 ]]; then
-        rm -f "${xui_script_temp}"
-        _fail "ERROR: Failed to install x-ui.sh script"
+        ${curl_bin} -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.sh" > /dev/null 2>&1
+        if [[ $? -ne 0 || ! -s "${xui_script_temp}" ]]; then
+            rm -f "${xui_script_temp}"
+            _fail "ERROR: Failed to download x-ui.sh script, please be sure that your server can access GitHub"
+        fi
+        mv -f "${xui_script_temp}" /usr/bin/x-ui
+        if [[ $? -ne 0 ]]; then
+            rm -f "${xui_script_temp}"
+            _fail "ERROR: Failed to install x-ui.sh script"
+        fi
     fi
 
     chmod +x ${xui_folder}/x-ui.sh > /dev/null 2>&1
@@ -1100,7 +1165,7 @@ update_x-ui() {
         echo -e "${green}Downloading and installing startup unit x-ui.rc...${plain}"
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        ${curl_bin} -fLRo "${xui_rc_temp}" https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.rc > /dev/null 2>&1
+        ${curl_bin} -fLRo "${xui_rc_temp}" https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.rc > /dev/null 2>&1
         if [[ $? -ne 0 ]]; then
             rm -f "${xui_rc_temp}"
             _fail "ERROR: Failed to download startup unit x-ui.rc, please be sure that your server can access GitHub"
@@ -1159,13 +1224,13 @@ update_x-ui() {
                 echo -e "${yellow}Service files not found in tar.gz, downloading from GitHub...${plain}"
                 case "${release}" in
                     ubuntu | debian | armbian)
-                        service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.service.debian"
+                        service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.service.debian"
                         ;;
                     arch | manjaro | parch)
-                        service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.service.arch"
+                        service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.service.arch"
                         ;;
                     *)
-                        service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.service.rhel"
+                        service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.service.rhel"
                         ;;
                 esac
 

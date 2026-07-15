@@ -86,7 +86,7 @@ is_port_in_use() {
         return
     fi
     if command -v netstat > /dev/null 2>&1; then
-        netstat -lnt 2> /dev/null | awk -v p=":${port} " '$4 ~ p {exit 0} END {exit 1}'
+        netstat -lnt 2> /dev/null | awk -v p=":${port}$" '$4 ~ p {exit 0} END {exit 1}'
         return
     fi
     if command -v lsof > /dev/null 2>&1; then
@@ -968,8 +968,10 @@ prompt_and_setup_ssl() {
 
             local bind_local=""
             if [[ "$NONINTERACTIVE" == "1" ]]; then
-                # Cloud images must stay reachable on their public interface.
-                bind_local="n"
+                # Cloud images stay reachable on their public interface by default.
+                # Set XUI_BIND_LOCAL=y for a headless install that should instead
+                # bind loopback only (SSH-tunnel / reverse-proxy access).
+                bind_local="${XUI_BIND_LOCAL:-n}"
             else
                 read -rp "Bind the panel to 127.0.0.1 only? (recommended — forces SSH tunnel / reverse-proxy access) [y/N]: " bind_local
             fi
@@ -1184,7 +1186,7 @@ EOF
                     config_port="${XUI_PANEL_PORT}"
                     echo -e "${yellow}Your Panel Port is: ${config_port}${plain}"
                 else
-                    config_port=$(shuf -i 1024-62000 -n 1)
+                    config_port=$(pick_random_free_port)
                     echo -e "${yellow}Generated random port: ${config_port}${plain}"
                 fi
             else
@@ -1193,7 +1195,7 @@ EOF
                     read -rp "Please set up the panel port: " config_port
                     echo -e "${yellow}Your Panel Port is: ${config_port}${plain}"
                 else
-                    config_port=$(shuf -i 1024-62000 -n 1)
+                    config_port=$(pick_random_free_port)
                     echo -e "${yellow}Generated random port: ${config_port}${plain}"
                 fi
             fi
@@ -1220,12 +1222,20 @@ EOF
             echo -e "${green}     Panel Installation Complete!         ${plain}"
             echo -e "${green}═══════════════════════════════════════════${plain}"
             echo -e "${green}Username:    ${config_username}${plain}"
-            echo -e "${green}Password:    ${config_password}${plain}"
+            if [[ "$NONINTERACTIVE" == "1" ]]; then
+                echo -e "${green}Password:    (saved to /etc/x-ui/install-result.env, mode 600 — hidden from logs)${plain}"
+            else
+                echo -e "${green}Password:    ${config_password}${plain}"
+            fi
             echo -e "${green}Port:        ${config_port}${plain}"
             echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
             echo -e "${green}Database:    ${db_label}${plain}"
             echo -e "${green}Access URL:  ${SSL_SCHEME}://${SSL_HOST}:${config_port}/${config_webBasePath}${plain}"
-            echo -e "${green}API Token:   ${config_apiToken}${plain}"
+            if [[ "$NONINTERACTIVE" == "1" ]]; then
+                echo -e "${green}API Token:   (saved to /etc/x-ui/install-result.env, mode 600 — hidden from logs)${plain}"
+            else
+                echo -e "${green}API Token:   ${config_apiToken}${plain}"
+            fi
             echo -e "${green}═══════════════════════════════════════════${plain}"
             echo -e "${yellow}⚠ IMPORTANT: Save these credentials securely!${plain}"
             if [[ "$SSL_SCHEME" == "https" ]]; then
@@ -1246,20 +1256,26 @@ EOF
                 echo -e "${green}═══════════════════════════════════════════${plain}"
                 echo -e "${green}     PostgreSQL Credentials               ${plain}"
                 echo -e "${green}═══════════════════════════════════════════${plain}"
-                echo -e "${green}DB Name:    ${PG_DB}${plain}"
-                echo -e "${green}Username:   ${PG_USER}${plain}"
-                echo -e "${green}Password:   ${PG_PASS}${plain}"
-                echo -e "${green}Host:       ${PG_HOST}${plain}"
-                echo -e "${green}Port:       ${PG_PORT}${plain}"
-                echo -e "${green}DSN:        ${xui_dsn}${plain}"
-                echo -e "${green}Env file:   ${xui_env_file}${plain}"
-                echo -e "${green}-------------------------------------------${plain}"
-                echo -e "${green}Connect from this server:${plain}"
-                echo -e "  ${blue}sudo -u postgres psql -d ${PG_DB}${plain}      (as the postgres superuser)"
-                echo -e "  ${blue}PGPASSWORD='${PG_PASS}' psql -h ${PG_HOST} -p ${PG_PORT} -U ${PG_USER} -d ${PG_DB}${plain}"
-                echo -e "${green}═══════════════════════════════════════════${plain}"
-                echo -e "${yellow}⚠ The panel reads these credentials from ${xui_env_file}.${plain}"
-                echo -e "${yellow}⚠ Save the password — it is not stored anywhere else in plain text.${plain}"
+                if [[ "$NONINTERACTIVE" == "1" ]]; then
+                    echo -e "${green}DB Name:  ${PG_DB}   User: ${PG_USER}   Host: ${PG_HOST}:${PG_PORT}${plain}"
+                    echo -e "${green}Password + DSN saved to ${xui_env_file} (mode 600) — hidden from logs.${plain}"
+                    echo -e "${yellow}⚠ The panel reads these credentials from ${xui_env_file}.${plain}"
+                else
+                    echo -e "${green}DB Name:    ${PG_DB}${plain}"
+                    echo -e "${green}Username:   ${PG_USER}${plain}"
+                    echo -e "${green}Password:   ${PG_PASS}${plain}"
+                    echo -e "${green}Host:       ${PG_HOST}${plain}"
+                    echo -e "${green}Port:       ${PG_PORT}${plain}"
+                    echo -e "${green}DSN:        ${xui_dsn}${plain}"
+                    echo -e "${green}Env file:   ${xui_env_file}${plain}"
+                    echo -e "${green}-------------------------------------------${plain}"
+                    echo -e "${green}Connect from this server:${plain}"
+                    echo -e "  ${blue}sudo -u postgres psql -d ${PG_DB}${plain}      (as the postgres superuser)"
+                    echo -e "  ${blue}PGPASSWORD='${PG_PASS}' psql -h ${PG_HOST} -p ${PG_PORT} -U ${PG_USER} -d ${PG_DB}${plain}"
+                    echo -e "${green}═══════════════════════════════════════════${plain}"
+                    echo -e "${yellow}⚠ The panel reads these credentials from ${xui_env_file}.${plain}"
+                    echo -e "${yellow}⚠ Save the password — it is not stored anywhere else in plain text.${plain}"
+                fi
                 unset PG_USER PG_PASS PG_HOST PG_PORT PG_DB
             fi
 
@@ -1301,7 +1317,11 @@ EOF
             echo -e "Generated new random login credentials:"
             echo -e "###############################################"
             echo -e "${green}Username: ${config_username}${plain}"
-            echo -e "${green}Password: ${config_password}${plain}"
+            if [[ "$NONINTERACTIVE" == "1" ]]; then
+                echo -e "${green}Password: (saved to /etc/x-ui/install-result.env, mode 600 — hidden from logs)${plain}"
+            else
+                echo -e "${green}Password: ${config_password}${plain}"
+            fi
             echo -e "###############################################"
 
             # Persist a machine-parseable credentials file for cloud-init / MOTD.
@@ -1395,6 +1415,85 @@ _install_xui_service_unit() {
     return 0
 }
 
+# --- Release integrity / port helpers --------------------------------------
+# Pick a random unused TCP port in the panel range, retrying on collision so the
+# panel is never assigned a port another service is already listening on.
+pick_random_free_port() {
+    local p attempts=0
+    while :; do
+        p=$(shuf -i 1024-62000 -n 1)
+        if ! is_port_in_use "$p"; then
+            echo "$p"
+            return 0
+        fi
+        attempts=$((attempts + 1))
+        if [[ $attempts -ge 20 ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+}
+
+# Print the lowercase hex SHA-256 of a file, using whichever tool is present
+# (sha256sum from coreutils/busybox, else openssl installed by install_base).
+sha256_of() {
+    local f="$1"
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$f" 2> /dev/null | awk '{print $1}'
+    elif command -v openssl > /dev/null 2>&1; then
+        openssl dgst -sha256 "$f" 2> /dev/null | awk '{print $NF}'
+    fi
+}
+
+# Fetch the SHA-256 digest the GitHub Releases API publishes for a release asset
+# (assets[].digest = "sha256:<hex>"). Prints the bare hex, or nothing when the
+# API is unreachable or the release predates digest support. Robust to pretty
+# and compact JSON: strip spaces, split objects/fields onto their own lines,
+# then take the first digest following the matching asset name.
+github_asset_sha256() {
+    local tag="$1" asset="$2"
+    curl -Ls --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+        "https://api.github.com/repos/Human1-12/proxy-panel-3xui/releases/tags/${tag}" 2> /dev/null \
+        | tr -d ' ' \
+        | tr ',{}' '\n\n\n' \
+        | awk -v a="\"name\":\"${asset}\"" '
+            $0 == a { found = 1 }
+            found && /^"digest":"sha256:/ {
+                sub(/^"digest":"sha256:/, "")
+                sub(/".*/, "")
+                print
+                exit
+            }'
+}
+
+# Verify a downloaded release tarball against its published digest. Returns 1
+# only on a definite mismatch (fail closed); a missing digest or missing hashing
+# tool is a warning (fail open) so transient issues don't block real installs.
+verify_download_checksum() {
+    local file="$1" tag="$2"
+    local asset="x-ui-linux-$(arch).tar.gz"
+    local expected actual
+    expected=$(github_asset_sha256 "$tag" "$asset")
+    if [[ -z "$expected" ]]; then
+        echo -e "${yellow}Warning: no published SHA-256 for ${asset} (tag ${tag}); skipping integrity check.${plain}" >&2
+        return 0
+    fi
+    actual=$(sha256_of "$file")
+    if [[ -z "$actual" ]]; then
+        echo -e "${yellow}Warning: neither sha256sum nor openssl available; skipping integrity check.${plain}" >&2
+        return 0
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        echo -e "${red}Integrity check FAILED for ${asset}${plain}"
+        echo -e "${red}  expected: ${expected}${plain}"
+        echo -e "${red}  actual:   ${actual}${plain}"
+        echo -e "${red}Refusing to install a corrupted or tampered archive.${plain}"
+        return 1
+    fi
+    echo -e "${green}Integrity check passed (sha256 verified).${plain}"
+    return 0
+}
+
 install_x-ui() {
     cd ${xui_folder%/x-ui}/
 
@@ -1447,17 +1546,10 @@ install_x-ui() {
             exit 1
         fi
     fi
-    local xui_script_temp="/usr/bin/x-ui-temp.$$"
-    rm -f "${xui_script_temp}"
-    curl -fLRo "${xui_script_temp}" https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.sh
-    if [[ $? -ne 0 ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Failed to download x-ui.sh${plain}"
-        exit 1
-    fi
-    if [[ ! -s "${xui_script_temp}" ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Downloaded x-ui.sh is empty${plain}"
+    # Integrity check: verify the downloaded archive against the SHA-256 that the
+    # GitHub Releases API publishes for this asset. Fail closed on a mismatch.
+    if ! verify_download_checksum "${xui_folder}-linux-$(arch).tar.gz" "${tag_version}"; then
+        rm -f "${xui_folder}-linux-$(arch).tar.gz"
         exit 1
     fi
 
@@ -1480,7 +1572,6 @@ install_x-ui() {
     tar zxvf x-ui-linux-$(arch).tar.gz
     if [[ $? -ne 0 ]]; then
         rm x-ui-linux-$(arch).tar.gz -f
-        rm -f "${xui_script_temp}"
         echo -e "${red}Failed to extract the x-ui release archive -- the previous installation has already been removed, so the panel will not start until this is fixed; try running the installer again${plain}"
         exit 1
     fi
@@ -1488,7 +1579,6 @@ install_x-ui() {
 
     cd x-ui
     if [[ $? -ne 0 || ! -s x-ui ]]; then
-        rm -f "${xui_script_temp}"
         echo -e "${red}Extracted x-ui archive is missing the x-ui binary -- the previous installation has already been removed, so the panel will not start until this is fixed; try running the installer again${plain}"
         exit 1
     fi
@@ -1513,12 +1603,21 @@ install_x-ui() {
         chmod +x bin/mtg-linux-$(arch)
     fi
 
-    # Update x-ui cli and se set permission
-    mv -f "${xui_script_temp}" /usr/bin/x-ui
-    if [[ $? -ne 0 ]]; then
+    # Install the x-ui management CLI from the extracted, integrity-verified
+    # tarball instead of a second unverified fetch of the moving main branch.
+    # Fall back to a tag-pinned download only if the tarball lacks x-ui.sh.
+    if [[ -s x-ui.sh ]]; then
+        cp -f x-ui.sh /usr/bin/x-ui
+    else
+        xui_script_temp="/usr/bin/x-ui-temp.$$"
         rm -f "${xui_script_temp}"
-        echo -e "${red}Failed to install x-ui.sh${plain}"
-        exit 1
+        curl -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.sh"
+        if [[ $? -ne 0 || ! -s "${xui_script_temp}" ]]; then
+            rm -f "${xui_script_temp}"
+            echo -e "${red}Failed to download x-ui.sh${plain}"
+            exit 1
+        fi
+        mv -f "${xui_script_temp}" /usr/bin/x-ui
     fi
     chmod +x /usr/bin/x-ui
     mkdir -p /var/log/x-ui
@@ -1541,7 +1640,7 @@ install_x-ui() {
     if [[ $release == "alpine" ]]; then
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        curl -fLRo "${xui_rc_temp}" https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.rc
+        curl -fLRo "${xui_rc_temp}" https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.rc
         if [[ $? -ne 0 ]]; then
             rm -f "${xui_rc_temp}"
             echo -e "${red}Failed to download x-ui.rc${plain}"
@@ -1606,13 +1705,13 @@ install_x-ui() {
             echo -e "${yellow}Service files not found in tar.gz, downloading from GitHub...${plain}"
             case "${release}" in
                 ubuntu | debian | armbian)
-                    service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.service.debian"
+                    service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.service.debian"
                     ;;
                 arch | manjaro | parch)
-                    service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.service.arch"
+                    service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.service.arch"
                     ;;
                 *)
-                    service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/x-ui.service.rhel"
+                    service_unit_url="https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/${tag_version}/x-ui.service.rhel"
                     ;;
             esac
 
@@ -1664,4 +1763,14 @@ install_x-ui() {
 
 echo -e "${green}Running...${plain}"
 install_base
+# install_base is best-effort; confirm the tools the rest of the script hard-
+# depends on actually landed, so a package-manager/network failure surfaces here
+# with an accurate message instead of later masquerading as "cannot reach GitHub".
+for _need in curl tar; do
+    if ! command -v "$_need" > /dev/null 2>&1; then
+        echo -e "${red}Required command '${_need}' is missing and could not be installed.${plain}"
+        echo -e "${red}Fix your package manager / network, then re-run the installer.${plain}"
+        exit 1
+    fi
+done
 install_x-ui $1

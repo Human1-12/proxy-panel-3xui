@@ -237,11 +237,15 @@ legacy_version() {
         echo "Panel version cannot be empty. Exiting."
         exit 1
     fi
-    # Use the entered panel version in the download link
-    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/v$tag_version/install.sh") v$tag_version"
+    # Validate the version so it can't inject arbitrary text into the shell below.
+    if ! [[ "$tag_version" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        echo "Invalid version format. Expected something like 2.4.0."
+        exit 1
+    fi
 
     echo "Downloading and installing panel version $tag_version..."
-    eval $install_command
+    # Legacy builds live in the upstream repo; run its installer directly (no eval).
+    bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/v${tag_version}/install.sh") "v${tag_version}"
 }
 
 # Function to handle the deletion of the script file
@@ -303,7 +307,7 @@ uninstall() {
     echo ""
     echo -e "Uninstalled Successfully.\n"
     echo "If you need to install this panel again, you can use below command:"
-    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)${plain}"
+    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/Human1-12/proxy-panel-3xui/main/install.sh)${plain}"
     echo ""
     # Trap the SIGTERM signal
     trap delete_script SIGTERM
