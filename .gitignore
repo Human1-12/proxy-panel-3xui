@@ -45,3 +45,6 @@ docker-compose.override.yml
 # Ignore .env (Environment Variables) file
 .env
 *.exe~
+
+# Internal planning docs — kept locally, never published
+docs/免费版X-Panel_*.md
