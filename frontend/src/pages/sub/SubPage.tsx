@@ -42,6 +42,10 @@ import './SubPage.css';
 
 const QR_SIZE = 240;
 
+// Subscription-page brand accent (teal / 松石绿). Gives the page a bespoke look
+// instead of default antd blue; scoped to this page only via a merged theme.
+const BRAND_ACCENT = '#0f8f86';
+
 const subData = window.__SUB_PAGE_DATA__ || {};
 
 const sId = subData.sId || '';
@@ -232,12 +236,16 @@ export default function SubPage() {
 
   const themeIcon = !isDark ? <SunOutlined /> : !isUltra ? <MoonOutlined /> : <MoonFilled />;
 
-  const cardTitle = (
-    <Space>
-      <span>{t('subscription.title')}</span>
-      <Tag>{sId}</Tag>
-    </Space>
-  );
+  // Merge a teal brand accent into the shared theme so buttons/links/tags on this
+  // page use it instead of default antd blue, while keeping the light/dark/ultra
+  // algorithm from useTheme intact.
+  const brandTheme = useMemo(() => {
+    const base = (antdThemeConfig ?? {}) as Record<string, unknown>;
+    const token = (base.token ?? {}) as Record<string, unknown>;
+    return { ...base, token: { ...token, colorPrimary: BRAND_ACCENT, colorInfo: BRAND_ACCENT, colorLink: BRAND_ACCENT } };
+  }, [antdThemeConfig]);
+
+  const cardTitle = <span>{t('subscription.title')}</span>;
 
   const cardExtra = (
     <Space size={8} align="center">
@@ -278,13 +286,17 @@ export default function SubPage() {
   );
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={brandTheme}>
       {messageContextHolder}
       <Layout className={pageClass}>
         <Layout.Content className="content">
           <Row justify="center">
             <Col xs={24} sm={22} md={18} lg={14} xl={12}>
               <Card hoverable className="subscription-card" title={cardTitle} extra={cardExtra}>
+                <div className="sub-hero">
+                  <div className="sub-hero-title">{subTitle || t('subscription.title')}</div>
+                  <div className="sub-hero-id">{sId}</div>
+                </div>
                 {announce && (
                   <Alert type="info" showIcon message={announce} style={{ marginBottom: 16 }} />
                 )}
