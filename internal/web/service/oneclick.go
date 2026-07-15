@@ -50,6 +50,9 @@ type OneClickResult struct {
 	Failed    int                      `json:"failed"`
 	Inbounds  []OneClickCreatedInbound `json:"inbounds"`
 	Errors    []string                 `json:"errors,omitempty"`
+	// Firewall summarizes the best-effort host-firewall port opening for the
+	// created nodes (empty when nothing was created).
+	Firewall string `json:"firewall,omitempty"`
 }
 
 // oneClickRandHex returns nBytes of cryptographically-random data as a lowercase
@@ -382,6 +385,18 @@ func (s *InboundService) BatchCreateRealityVision(userId int, req OneClickRealit
 			Email:    email,
 			Protocol: string(proto),
 		})
+	}
+
+	// Best-effort: open the freshly created ports in the host firewall so a new
+	// node is reachable out of the box (the whole point of one-click). Never
+	// fatal — a firewall failure is reported in result.Firewall, not raised.
+	// ss2022 accepts UDP as well as TCP, so open both for it.
+	if result.Created > 0 {
+		openedPorts := make([]int, 0, len(result.Inbounds))
+		for _, ib := range result.Inbounds {
+			openedPorts = append(openedPorts, ib.Port)
+		}
+		result.Firewall = openFirewallPorts(openedPorts, req.Protocol == "ss2022")
 	}
 
 	return result, anyRestart, nil

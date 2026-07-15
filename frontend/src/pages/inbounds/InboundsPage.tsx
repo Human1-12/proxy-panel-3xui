@@ -559,6 +559,7 @@ export default function InboundsPage() {
     failed: number;
     errors: string[];
     ports: number[];
+    firewall?: string;
   } | null>(null);
   const [oneClickForm] = Form.useForm();
   const oneClickProto = Form.useWatch('protocol', oneClickForm);
@@ -595,6 +596,7 @@ export default function InboundsPage() {
           failed?: number;
           errors?: string[];
           inbounds?: { port?: number }[];
+          firewall?: string;
         };
         const created = obj.created ?? 0;
         const failed = obj.failed ?? 0;
@@ -603,6 +605,7 @@ export default function InboundsPage() {
           failed,
           errors: obj.errors ?? [],
           ports: (obj.inbounds ?? []).map((i) => i.port ?? 0).filter((p) => p > 0),
+          firewall: obj.firewall,
         });
         await refresh();
         if (failed === 0) {
@@ -910,6 +913,9 @@ export default function InboundsPage() {
                 <div style={{ fontSize: 12 }}>
                   {oneClickResult.ports.length > 0 && (
                     <div>已用端口：{oneClickResult.ports.join('、')}</div>
+                  )}
+                  {oneClickResult.firewall && (
+                    <div style={{ marginTop: 2 }}>防火墙：{oneClickResult.firewall}</div>
                   )}
                   {oneClickResult.errors.length > 0 && (
                     <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
