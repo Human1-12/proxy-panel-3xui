@@ -103,7 +103,14 @@ jobs:
           if [[ "$GITHUB_REF" != refs/tags/* ]]; then
             LDFLAGS="$LDFLAGS -X github.com/mhsanaei/3x-ui/v3/internal/config.buildCommit=${GITHUB_SHA::8} -X github.com/mhsanaei/3x-ui/v3/internal/config.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           else
-            LDFLAGS="$LDFLAGS -X github.com/mhsanaei/3x-ui/v3/internal/config.releaseVersion=${GITHUB_REF#refs/tags/}"
+            # Stamp the release tag into the embedded version file (compile-time,
+            # cache-proof) so x-ui -v reports the actual release version, not the
+            # upstream base. Changing the file content forces a recompile of the
+            # config package, so a stale build/link cache can't serve an old value
+            # the way an ldflags -X can.
+            XUI_REL_VER="${GITHUB_REF#refs/tags/v}"
+            echo "XUI_VER: stamping release version [$XUI_REL_VER] from GITHUB_REF=[$GITHUB_REF]"
+            printf '%s' "$XUI_REL_VER" > internal/config/version
           fi
           go build -ldflags "$LDFLAGS" -o xui-release -v main.go
           file xui-release
@@ -264,7 +271,14 @@ jobs:
           if [[ "$GITHUB_REF" != refs/tags/* ]]; then
             LDFLAGS="$LDFLAGS -X github.com/mhsanaei/3x-ui/v3/internal/config.buildCommit=${GITHUB_SHA:0:8} -X github.com/mhsanaei/3x-ui/v3/internal/config.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           else
-            LDFLAGS="$LDFLAGS -X github.com/mhsanaei/3x-ui/v3/internal/config.releaseVersion=${GITHUB_REF#refs/tags/}"
+            # Stamp the release tag into the embedded version file (compile-time,
+            # cache-proof) so x-ui -v reports the actual release version, not the
+            # upstream base. Changing the file content forces a recompile of the
+            # config package, so a stale build/link cache can't serve an old value
+            # the way an ldflags -X can.
+            XUI_REL_VER="${GITHUB_REF#refs/tags/v}"
+            echo "XUI_VER: stamping release version [$XUI_REL_VER] from GITHUB_REF=[$GITHUB_REF]"
+            printf '%s' "$XUI_REL_VER" > internal/config/version
           fi
           go build -ldflags "$LDFLAGS" -o xui-release.exe -v main.go
 
