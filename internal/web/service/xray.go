@@ -310,7 +310,12 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	// subscription service are kept stable across refreshes so that balancers and
 	// routing rules continue to work.
 	subSvc := &OutboundSubscriptionService{}
-	if prepend, appendList, err := subSvc.activeOutboundsSplit(); err == nil && (len(prepend) > 0 || len(appendList) > 0) {
+	if prepend, appendList, err := subSvc.activeOutboundsSplit(); err != nil {
+		// Fail loud, not silent: a DB error here drops all subscription outbounds
+		// from the generated config, breaking any balancer/routing rule that
+		// references them.
+		logger.Warning("build xray config: load subscription outbounds failed; they will be absent from this config:", err)
+	} else if len(prepend) > 0 || len(appendList) > 0 {
 		mergeSubscriptionOutbounds(xrayConfig, prepend, appendList)
 	}
 

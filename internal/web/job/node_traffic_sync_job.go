@@ -282,8 +282,10 @@ func (j *NodeTrafficSyncJob) nodeInboundSpeed() []*xray.Traffic {
 			dDown = 0
 		}
 		elapsed := max(now-prev.at, nodeInboundSpeedWindowMs)
-		up := dUp * nodeInboundSpeedWindowMs / elapsed
-		down := dDown * nodeInboundSpeedWindowMs / elapsed
+		// Float math avoids int64 overflow when a first-after-gap delta is huge
+		// (dUp * window would wrap); this is a display speed, precision loss is moot.
+		up := int64(float64(dUp) * float64(nodeInboundSpeedWindowMs) / float64(elapsed))
+		down := int64(float64(dDown) * float64(nodeInboundSpeedWindowMs) / float64(elapsed))
 		if up > 0 || down > 0 {
 			deltas = append(deltas, &xray.Traffic{Tag: tag, IsInbound: true, Up: up, Down: down})
 		}

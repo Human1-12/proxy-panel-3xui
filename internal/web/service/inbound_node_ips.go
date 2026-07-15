@@ -7,6 +7,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 
 	"gorm.io/gorm/clause"
 )
@@ -85,7 +86,9 @@ func upsertNodeClientIps(guid string, perEmail map[string][]model.ClientIpEntry)
 		incoming := perEmail[email]
 		var old []model.ClientIpEntry
 		if cur, ok := existingByEmail[email]; ok && cur.Ips != "" {
-			_ = json.Unmarshal([]byte(cur.Ips), &old)
+			if err := json.Unmarshal([]byte(cur.Ips), &old); err != nil {
+				logger.Warningf("node client IPs: corrupt stored IPs for %q, dropping them from the merge: %v", email, err)
+			}
 		}
 		merged := mergeModelClientIpEntries(old, incoming, cutoff)
 		if len(merged) == 0 {
@@ -99,7 +102,11 @@ func upsertNodeClientIps(guid string, perEmail map[string][]model.ClientIpEntry)
 			}
 			continue
 		}
-		b, _ := json.Marshal(merged)
+		b, err := json.Marshal(merged)
+		if err != nil {
+			logger.Warningf("node client IPs: marshal merged IPs for %q failed, skipping write: %v", email, err)
+			continue
+		}
 		row := model.NodeClientIp{NodeGuid: guid, Email: email, Ips: string(b)}
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "node_guid"}, {Name: "email"}},

@@ -1032,8 +1032,12 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 		patch.LastError = "decode response: " + err.Error()
 		return patch, err
 	}
-	if !envelope.Success || envelope.Obj == nil {
+	if !envelope.Success {
 		patch.LastError = "remote returned success=false: " + envelope.Msg
+		return patch, errors.New(patch.LastError)
+	}
+	if envelope.Obj == nil {
+		patch.LastError = "remote returned success with empty payload"
 		return patch, errors.New(patch.LastError)
 	}
 	o := envelope.Obj
