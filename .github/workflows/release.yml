@@ -112,6 +112,10 @@ jobs:
             echo "XUI_VER: stamping release version [$XUI_REL_VER] from GITHUB_REF=[$GITHUB_REF]"
             printf '%s' "$XUI_REL_VER" > internal/config/version
           fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "XUI_VER: pre-build pwd=$(pwd) version=[$(cat internal/config/version)]"
+            go clean -cache
+          fi
           go build -ldflags "$LDFLAGS" -o xui-release -v main.go
           file xui-release
           ldd xui-release || echo "Static binary confirmed"
@@ -279,6 +283,10 @@ jobs:
             XUI_REL_VER="${GITHUB_REF#refs/tags/v}"
             echo "XUI_VER: stamping release version [$XUI_REL_VER] from GITHUB_REF=[$GITHUB_REF]"
             printf '%s' "$XUI_REL_VER" > internal/config/version
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "XUI_VER: pre-build pwd=$(pwd) version=[$(cat internal/config/version)]"
+            go clean -cache
           fi
           go build -ldflags "$LDFLAGS" -o xui-release.exe -v main.go
 
