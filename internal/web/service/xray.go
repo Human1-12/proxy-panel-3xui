@@ -612,15 +612,62 @@ func mergeSubscriptionOutbounds(cfg *xray.Config, prepend, appendList []any) {
 			return
 		}
 	}
+	// xray-core treats the FIRST outbound (index 0) as the default handler for any
+	// traffic matching no routing rule. The template ships "direct"/freedom at
+	// index 0, so a Prepend subscription must NOT displace it — otherwise all
+	// unmatched traffic on a relay would silently egress through a provider server
+	// (and which one could change on every refresh). Keep the template's index-0
+	// outbound pinned first; Prepend goes right after it.
 	var merged []any
-	merged = append(merged, prepend...)
-	merged = append(merged, templateOutbounds...)
+	if len(templateOutbounds) > 0 {
+		merged = append(merged, templateOutbounds[0])
+		merged = append(merged, prepend...)
+		merged = append(merged, templateOutbounds[1:]...)
+	} else {
+		merged = append(merged, prepend...)
+	}
 	merged = append(merged, appendList...)
+	merged = dedupeOutboundTags(merged)
 	combined, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return
 	}
 	cfg.OutboundConfigs = json_util.RawMessage(combined)
+}
+
+// dedupeOutboundTags guarantees every outbound in the merged array has a unique
+// non-empty tag. xray-core refuses to start if two outbounds share a non-empty
+// tag ("existing tag found"), which would take a relay down entirely. Tag
+// uniqueness is only enforced per-subscription upstream (assignStableTags), so a
+// cross-subscription or subscription-vs-template collision can still happen (e.g.
+// two subscriptions sharing a manual tag prefix). Rather than let xray reject the
+// whole config, keep the first occurrence and suffix later duplicates, logging
+// each rename; first-wins means routing rules referencing the tag still resolve
+// to the original outbound.
+func dedupeOutboundTags(outbounds []any) []any {
+	seen := make(map[string]bool, len(outbounds))
+	for _, ob := range outbounds {
+		m, ok := ob.(map[string]any)
+		if !ok {
+			continue
+		}
+		tag, _ := m["tag"].(string)
+		if tag == "" {
+			continue
+		}
+		if !seen[tag] {
+			seen[tag] = true
+			continue
+		}
+		newTag := tag
+		for k := 1; seen[newTag]; k++ {
+			newTag = fmt.Sprintf("%s-dup%d", tag, k)
+		}
+		seen[newTag] = true
+		m["tag"] = newTag
+		logger.Warningf("duplicate outbound tag %q in merged config; renamed a later occurrence to %q so xray does not reject the config (check for subscriptions sharing a tag prefix)", tag, newTag)
+	}
+	return outbounds
 }
 
 // ensureAPIServices guarantees the gRPC services the panel depends on are

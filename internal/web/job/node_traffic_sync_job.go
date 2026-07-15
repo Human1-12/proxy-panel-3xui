@@ -390,7 +390,14 @@ func (j *NodeTrafficSyncJob) syncOne(mgr *runtime.Manager, n *model.Node, doIpSy
 		return nil
 	}
 	service.FilterNodeSnapshot(n, snap)
-	_, _, dirty, _, _ := j.nodeService.NodeSyncState(n.Id)
+	_, _, dirty, _, syncErr := j.nodeService.NodeSyncState(n.Id)
+	if syncErr != nil {
+		// On an unknown dirty state (e.g. a transient DB lock), assume dirty so
+		// SetRemoteTraffic does NOT adopt the node's reported config and clobber
+		// pending master-side edits. Skipping adoption this tick is the safe choice.
+		logger.Warningf("node traffic sync: NodeSyncState for %s failed; treating as dirty to avoid overwriting pending edits: %v", n.Name, syncErr)
+		dirty = true
+	}
 	changed, err := j.inboundService.SetRemoteTraffic(n.Id, snap, dirty)
 	if err != nil {
 		logger.Warningf("node traffic sync: merge for %s failed: %v", n.Name, err)

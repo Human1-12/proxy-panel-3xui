@@ -113,13 +113,18 @@ func (s *NodeService) GetAll() ([]*model.Node, error) {
 		NodeID int `gorm:"column:node_id"`
 	}
 	var inboundRows []inboundRow
-	if err := db.Table("inbounds").
+	inboundLoadErr := db.Table("inbounds").
 		Select("id, node_id").
 		Where("node_id IS NOT NULL").
-		Scan(&inboundRows).Error; err != nil {
-		return nodes, nil
+		Scan(&inboundRows).Error
+	if inboundLoadErr != nil {
+		// Best-effort enrichment: log and fall through so the list still renders
+		// and the independent client/status queries below still run, instead of
+		// silently returning zero counts for every node with no error indication.
+		logger.Warning("GetAll: load node inbound ids failed; per-node inbound counts may show as zero:", inboundLoadErr)
 	}
-	if len(inboundRows) == 0 {
+	if inboundLoadErr == nil && len(inboundRows) == 0 {
+		// Genuinely no node inbounds → no client/status counts to compute either.
 		return nodes, nil
 	}
 	inboundsByNode := make(map[int][]int, len(nodes))
@@ -842,6 +847,12 @@ func (s *NodeService) ProbeWithOutbound(ctx context.Context, n *model.Node, outb
 // into the config (e.g. while the node is still being added or edited). When
 // Xray isn't running or the bridge can't be built, fn runs with an empty
 // proxyURL so callers fall back to a direct connection.
+// xrayBridgeMu serializes the temporary routing/inbound mutations that
+// withOutboundBridge applies to the single global Xray process. Without it, two
+// concurrent probes (heartbeat reconcile + a manual test) race on the live
+// router config and clobber each other's bridge rule.
+var xrayBridgeMu sync.Mutex
+
 func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func(proxyURL string)) {
 	proc := XrayProcess()
 	if proc == nil || !proc.IsRunning() {
@@ -853,6 +864,10 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 		fn("")
 		return
 	}
+	// Serialize the live-router mutation below: concurrent bridges would clobber
+	// each other's temp routing rule and produce wrong probe results.
+	xrayBridgeMu.Lock()
+	defer xrayBridgeMu.Unlock()
 
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -908,6 +923,7 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 	defer api.Close()
 
 	if err := api.AddInbound(inboundJSON); err != nil {
+		logger.Warningf("node %d outbound bridge: add temp inbound failed, falling back to a direct probe (node may show offline if only reachable via its egress): %v", nodeID, err)
 		fn("")
 		return
 	}
@@ -918,6 +934,7 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 	}()
 
 	if err := api.ApplyRoutingConfig(routingJSON); err != nil {
+		logger.Warningf("node %d outbound bridge: apply temp routing failed, falling back to a direct probe (node may show offline if only reachable via its egress): %v", nodeID, err)
 		fn("")
 		return
 	}

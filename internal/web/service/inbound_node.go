@@ -303,7 +303,12 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 	// origin (an inbound the node forwards from its own sub-node) is kept as-is,
 	// so a chained Node1->Node2->Node3 still attributes Node3's inbounds to Node3.
 	var nodeRow model.Node
-	db.Select("guid").Where("id = ?", nodeID).First(&nodeRow)
+	if err := db.Select("guid").Where("id = ?", nodeID).First(&nodeRow).Error; err != nil {
+		// GUID drives per-node attribution; if it can't be read (missing row or a
+		// transient error) attribution silently falls back to the node-id key. Log
+		// so the degraded state is diagnosable rather than silent.
+		logger.Warningf("setRemoteTraffic: load node %d guid failed; attribution may fall back to node-id: %v", nodeID, err)
+	}
 	selfKey := effectiveNodeKey(&model.Node{Id: nodeID, Guid: nodeRow.Guid})
 	guidShared := nodeRow.Guid != "" && selfKey != nodeRow.Guid
 	originGuidFor := func(snapIb *model.Inbound) string {
@@ -584,6 +589,9 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 			c.Remark != snapIb.Remark ||
 			c.Listen != snapIb.Listen ||
 			c.Port != snapIb.Port ||
+			c.Protocol != snapIb.Protocol ||
+			c.StreamSettings != snapIb.StreamSettings ||
+			c.Sniffing != snapIb.Sniffing ||
 			c.Total != snapIb.Total ||
 			c.ExpiryTime != snapIb.ExpiryTime ||
 			c.Enable != snapIb.Enable) {
@@ -916,7 +924,11 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 			}
 		}
 		if err := s.clientService.SyncInbound(tx, c.Id, filtered); err != nil {
-			logger.Warningf("setRemoteTraffic: sync clients for tag %q failed: %v", snapIb.Tag, err)
+			// Consistent with every other error in this function: fail the whole
+			// transaction (deferred rollback) instead of committing a partially
+			// synced client list and returning success. Traffic is an absolute
+			// set, so the next tick re-syncs cleanly.
+			return false, err
 		}
 	}
 

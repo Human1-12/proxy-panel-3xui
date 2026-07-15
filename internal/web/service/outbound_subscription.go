@@ -426,9 +426,12 @@ func assignStableTags(parsed []link.Outbound, identities []string, prev map[stri
 
 // AllActiveOutbounds returns the concatenation of the last-fetched outbounds
 // for every enabled subscription. This is the set that should be merged into
-// the final Xray config. Order: subscription creation order (by id asc) so
-// that later subscriptions can shadow earlier ones if the admin uses colliding
-// prefixes (last writer wins inside xray, but we try to keep tags unique).
+// the final Xray config. Order: subscription creation order (by id asc). Tags
+// are only kept unique WITHIN a subscription by assignStableTags; a
+// cross-subscription collision (e.g. two subscriptions sharing a manual prefix)
+// yields duplicate outbound tags, which xray REJECTS at startup — it does NOT
+// last-writer-win. mergeSubscriptionOutbounds' dedupeOutboundTags is the safety
+// net that renames later duplicates so the config still loads.
 func (s *OutboundSubscriptionService) AllActiveOutbounds() ([]any, error) {
 	prepend, appendList, err := s.activeOutboundsSplit()
 	if err != nil {
