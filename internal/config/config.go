@@ -27,6 +27,11 @@ var name string
 var (
 	buildCommit string
 	buildDate   string
+	// releaseVersion is injected at build time via `-ldflags -X` for tagged
+	// stable releases (the git tag, e.g. "v1.0.2"); see release.yml. It stays
+	// empty for dev builds and local `go build`, which then fall back to the
+	// embedded base version.
+	releaseVersion string
 )
 
 // LogLevel represents the logging level for the application.
@@ -77,14 +82,20 @@ func IsDevBuild() bool {
 // getPanelUpdateInfo latestVersion so a node on the current dev commit compares
 // as up to date instead of always showing "update available".
 func GetPanelVersion() string {
-	if !IsDevBuild() {
-		return GetBaseVersion()
+	if IsDevBuild() {
+		commit := GetBuildCommit()
+		if len(commit) > 8 {
+			commit = commit[:8]
+		}
+		return "dev+" + commit
 	}
-	commit := GetBuildCommit()
-	if len(commit) > 8 {
-		commit = commit[:8]
+	// A tagged release stamps its tag in via -ldflags (see release.yml); prefer it
+	// so the panel reports its actual release version (e.g. "1.0.2") instead of the
+	// embedded upstream base version. Local builds (no stamp) fall back to base.
+	if rv := strings.TrimSpace(releaseVersion); rv != "" {
+		return strings.TrimPrefix(rv, "v")
 	}
-	return "dev+" + commit
+	return GetBaseVersion()
 }
 
 // GetLogLevel returns the current logging level based on environment variables or defaults to Info.
