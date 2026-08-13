@@ -43,7 +43,7 @@ export default function TwoFactorModal({
     setQrValue('');
     if (token) {
       const totp = new OTPAuth.TOTP({
-        issuer: '3x-ui',
+        issuer: '3X-UI 中文增强版',
         label: 'Administrator',
         algorithm: 'SHA1',
         digits: 6,

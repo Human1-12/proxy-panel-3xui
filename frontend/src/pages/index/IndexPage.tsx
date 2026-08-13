@@ -34,7 +34,7 @@ import {
   DatabaseOutlined,
   ForkOutlined,
   CopyOutlined,
-  TelegramFilled,
+  GithubOutlined,
 } from '@ant-design/icons';
 
 import { HttpUtil, SizeFormatter, TimeFormatter, ClipboardManager, FileManager } from '@/utils';
@@ -139,8 +139,8 @@ export default function IndexPage() {
     if (msg?.success && msg.obj) setPanelUpdateInfo(msg.obj);
   }
 
-  function openTelegram() {
-    window.open('https://t.me/XrayUI', '_blank', 'noopener,noreferrer');
+  function openRepository() {
+    window.open('https://github.com/Human1-12/proxy-panel-3xui', '_blank', 'noopener,noreferrer');
   }
 
   async function openConfig() {
@@ -233,7 +233,7 @@ export default function IndexPage() {
                     <Card
                       title={
                         <Space>
-                          <span>3X-UI</span>
+                          <span>3X-UI 中文增强版</span>
                           {isMobile && displayVersion && (
                             <Tag color={panelUpdateInfo.updateAvailable ? 'orange' : 'green'}>
                               {panelUpdateInfo.updateAvailable
@@ -245,9 +245,9 @@ export default function IndexPage() {
                       }
                       hoverable
                       actions={[
-                        <Space className="action" key="tg" role="button" tabIndex={0} aria-label="@XrayUI" onClick={openTelegram} onKeyDown={activateOnKey(openTelegram)}>
-                          <TelegramFilled className="tg-icon" aria-hidden="true" />
-                          {!isMobile && <span>@XrayUI</span>}
+                        <Space className="action" key="github" role="button" tabIndex={0} aria-label="GitHub" onClick={openRepository} onKeyDown={activateOnKey(openRepository)}>
+                          <GithubOutlined className="tg-icon" aria-hidden="true" />
+                          {!isMobile && <span>GitHub</span>}
                         </Space>,
                         <Space
                           key="panel-version"

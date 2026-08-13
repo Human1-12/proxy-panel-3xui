@@ -33,6 +33,19 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestPanelUpdateSourceUsesEnhancedRepository(t *testing.T) {
+	const wantRepository = "Human1-12/proxy-panel-3xui"
+	if panelRepository != wantRepository {
+		t.Fatalf("panelRepository = %q, want %q", panelRepository, wantRepository)
+	}
+	if panelUpdaterURL != "https://raw.githubusercontent.com/"+wantRepository+"/main/update.sh" {
+		t.Fatalf("unexpected panelUpdaterURL: %s", panelUpdaterURL)
+	}
+	if panelReleaseAPI != "https://api.github.com/repos/"+wantRepository+"/releases" {
+		t.Fatalf("unexpected panelReleaseAPI: %s", panelReleaseAPI)
+	}
+}
+
 func TestCompareVersionStringsRejectsUnexpectedFormats(t *testing.T) {
 	if _, ok := compareVersionStrings("latest", "2.9.3"); ok {
 		t.Fatal("expected non-semver latest tag to be rejected")
